@@ -1,6 +1,6 @@
 # TS6 Droid
 
-Client libre TeamSpeak 3/6 pour Android, construit avec [tslib](https://github.com/flamme-demon/tslib) (bibliothèque Rust) et Jetpack Compose.
+Client libre et léger TeamSpeak 3/6 pour Android, construit avec [tslib](https://github.com/flamme-demon/tslib) (bibliothèque Rust) et Jetpack Compose.
 
 ## Fonctionnalités
 
