@@ -72,13 +72,37 @@ class TsConnectionService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_DISCONNECT = "com.flammedemon.ts6droid.DISCONNECT"
         private const val ACTION_TOGGLE_MUTE = "com.flammedemon.ts6droid.TOGGLE_MUTE"
+        private const val ACTION_SHOW_OVERLAY = "com.flammedemon.ts6droid.SHOW_OVERLAY"
+        private const val ACTION_HIDE_OVERLAY = "com.flammedemon.ts6droid.HIDE_OVERLAY"
 
         fun start(context: Context) {
-            context.startForegroundService(Intent(context, TsConnectionService::class.java))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(Intent(context, TsConnectionService::class.java))
+            } else {
+                context.startService(Intent(context, TsConnectionService::class.java))
+            }
         }
 
         fun stop(context: Context) {
             context.stopService(Intent(context, TsConnectionService::class.java))
+        }
+
+        fun showOverlay(context: Context) {
+            val intent = Intent(context, TsConnectionService::class.java).apply { action = ACTION_SHOW_OVERLAY }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun hideOverlay(context: Context) {
+            val intent = Intent(context, TsConnectionService::class.java).apply { action = ACTION_HIDE_OVERLAY }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
     }
 
@@ -173,6 +197,14 @@ class TsConnectionService : Service() {
             ACTION_TOGGLE_MUTE -> {
                 audioBridge.toggleMute()
                 updateNotification()
+                return START_STICKY
+            }
+            ACTION_SHOW_OVERLAY -> {
+                showFloatingWindow()
+                return START_STICKY
+            }
+            ACTION_HIDE_OVERLAY -> {
+                hideFloatingWindow()
                 return START_STICKY
             }
         }

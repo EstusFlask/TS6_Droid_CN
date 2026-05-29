@@ -316,6 +316,15 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun showFloatingWindow() {
+        if (_connectionState.value != ConnectionState.CONNECTED) return
+        serviceBinder?.service?.showFloatingWindow() ?: TsConnectionService.showOverlay(getApplication())
+    }
+
+    fun hideFloatingWindow() {
+        serviceBinder?.service?.hideFloatingWindow() ?: TsConnectionService.hideOverlay(getApplication())
+    }
+
     override fun onCleared() {
         serviceConnection?.let {
             try {
