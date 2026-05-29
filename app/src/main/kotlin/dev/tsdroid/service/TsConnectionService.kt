@@ -50,6 +50,16 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
+import androidx.core.view.ViewTreeLifecycleOwner
+import androidx.core.view.ViewTreeSavedStateRegistryOwner
+import androidx.core.view.ViewTreeViewModelStoreOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.SavedStateRegistry
+import androidx.lifecycle.SavedStateRegistryController
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import dev.tsdroid.MainActivity
 import dev.tsdroid.R
 import dev.tsdroid.TsDroidApp
@@ -65,7 +75,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class TsConnectionService : Service() {
+class TsConnectionService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
 
     companion object {
         private const val TAG = "TsConnService"
@@ -124,6 +134,14 @@ class TsConnectionService : Service() {
     private var composeView: ComposeView? = null
     private var overlayLayoutParams: WindowManager.LayoutParams? = null
 
+    private val lifecycleRegistry = LifecycleRegistry(this)
+    private val savedStateRegistryController = SavedStateRegistryController.create(this)
+    private val serviceViewModelStore = ViewModelStore()
+
+    override fun getLifecycle(): Lifecycle = lifecycleRegistry
+    override fun getSavedStateRegistry(): SavedStateRegistry = savedStateRegistryController.savedStateRegistry
+    override fun getViewModelStore(): ViewModelStore = serviceViewModelStore
+
     private var overlayConnected by mutableStateOf(false)
     private var overlayChannelName by mutableStateOf<String?>(null)
     private var overlayActiveSpeakerId by mutableStateOf<Int?>(null)
@@ -141,6 +159,8 @@ class TsConnectionService : Service() {
         overlayTouchSlop = ViewConfiguration.get(this).scaledTouchSlop
         audioBridge = AudioBridge(applicationContext, tsClient)
         audioBridge.initialize()
+        savedStateRegistryController.performRestore(null)
+        lifecycleRegistry.currentState = Lifecycle.State.STARTED
 
         // Listen for audio events, talk status, and play per-user mixing
         tsClient.events.onEach { event ->
@@ -267,6 +287,9 @@ class TsConnectionService : Service() {
         }
 
         composeView = ComposeView(this).apply {
+            ViewTreeLifecycleOwner.set(this, this@TsConnectionService)
+            ViewTreeSavedStateRegistryOwner.set(this, this@TsConnectionService)
+            ViewTreeViewModelStoreOwner.set(this, this@TsConnectionService)
             setContent {
                 FloatingOverlayContent(
                     connected = overlayConnected,
@@ -556,6 +579,8 @@ class TsConnectionService : Service() {
     }
 
     override fun onDestroy() {
+        lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+        serviceViewModelStore.clear()
         cancelPushToTalk()
         hideFloatingWindow()
         audioBridge.release()
