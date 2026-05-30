@@ -388,10 +388,17 @@ class ServerViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 "text_message" -> {
                     try {
-                        val target = event.data["target"] as? String ?: ""
-                        val sender = event.data["sender_name"] as? String ?: getApplication<Application>().getString(R.string.unknown_sender)
+                        // Safely extract message data with null checks
+                        val target = event.data["target"] as? String
+                        val sender = event.data["sender_name"] as? String
                         val senderId = (event.data["sender_id"] as? Number)?.toInt()
-                        val text = event.data["message"] as? String ?: ""
+                        val text = event.data["message"] as? String
+
+                        // Skip invalid messages early
+                        if (target == null || sender == null || text == null) {
+                            Log.w(TAG, "Invalid text_message: missing required fields")
+                            return
+                        }
 
                         Log.d(TAG, "Text message: target=$target sender=$sender text=${text.take(50)}")
 
@@ -399,33 +406,74 @@ class ServerViewModel(application: Application) : AndroidViewModel(application) 
                         val myId = tsClient?.clientId
                         if (myId != null && senderId == myId) return
 
-                        val attachment = parseFileAttachment(text)
+                        // Safely parse file attachment
+                        val attachment = try {
+                            parseFileAttachment(text)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing file attachment", e)
+                            null
+                        }
+
                         val displayText = if (attachment != null) attachment.fileName else text
 
-                        when (target) {
-                            "private" -> {
-                                val id = senderId ?: return
-                                val msg = ChatMessage(sender = sender, text = displayText, isPrivate = true, senderId = id, fileAttachment = attachment)
-                                val current = _privateMessages.value.toMutableMap()
-                                current[id] = (current[id] ?: emptyList()) + msg
-                                _privateMessages.value = current
-                                scheduleSave()
-                                // Only increment if chat is closed or not on this user's PM
-                                if (!isChatOpen || activeChatTab != 1 || activePmUserId != id) {
-                                    val unread = _unreadPrivate.value.toMutableMap()
-                                    unread[id] = (unread[id] ?: 0) + 1
-                                    _unreadPrivate.value = unread
+                        // Safely process based on message target
+                        try {
+                            when (target) {
+                                "private" -> {
+                                    val id = senderId ?: run {
+                                        Log.w(TAG, "Private message without sender ID")
+                                        return
+                                    }
+                                    
+                                    // Safely create and add message
+                                    val msg = ChatMessage(
+                                        sender = sender, 
+                                        text = displayText, 
+                                        isPrivate = true, 
+                                        senderId = id, 
+                                        fileAttachment = attachment
+                                    )
+                                    
+                                    val current = _privateMessages.value.toMutableMap()
+                                    val existingMessages = current[id] ?: emptyList()
+                                    current[id] = existingMessages + msg
+                                    _privateMessages.value = current
+                                    
+                                    scheduleSave()
+                                    
+                                    // Only increment if chat is closed or not on this user's PM
+                                    if (!isChatOpen || activeChatTab != 1 || activePmUserId != id) {
+                                        val unread = _unreadPrivate.value.toMutableMap()
+                                        val currentUnread = unread[id] ?: 0
+                                        unread[id] = currentUnread + 1
+                                        _unreadPrivate.value = unread
+                                    }
+                                }
+                                "channel" -> {
+                                    // Safely create and add channel message
+                                    val msg = ChatMessage(
+                                        sender = sender, 
+                                        text = displayText, 
+                                        fileAttachment = attachment
+                                    )
+                                    
+                                    val currentChannelMessages = _channelMessages.value
+                                    _channelMessages.value = currentChannelMessages + msg
+                                    
+                                    scheduleSave()
+                                    
+                                    // Only increment if chat is closed or not on channel tab
+                                    if (!isChatOpen || activeChatTab != 0) {
+                                        val currentUnread = _unreadChannel.value
+                                        _unreadChannel.value = currentUnread + 1
+                                    }
+                                }
+                                else -> {
+                                    Log.w(TAG, "Unknown message target: $target")
                                 }
                             }
-                            "channel" -> {
-                                val msg = ChatMessage(sender = sender, text = displayText, fileAttachment = attachment)
-                                _channelMessages.value = _channelMessages.value + msg
-                                scheduleSave()
-                                // Only increment if chat is closed or not on channel tab
-                                if (!isChatOpen || activeChatTab != 0) {
-                                    _unreadChannel.value++
-                                }
-                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error adding message to UI", e)
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error processing text_message event", e)

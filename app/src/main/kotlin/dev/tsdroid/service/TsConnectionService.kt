@@ -546,9 +546,25 @@ class TsConnectionService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         ) {
             if (!isExpanded) {
                 // --- COLLAPSED AVATAR BUBBLE ---
-                // If local user is speaker, rely on true voice activity; else just activeSpeakerName
-                val isLocalSpeaker = myId != null && users.find { it.id == myId }?.nickname == activeSpeakerName
-                val isSpeaking = if (isLocalSpeaker) isLocalVoiceActive else !activeSpeakerName.isNullOrEmpty()
+                // Check if local user is speaking based on actual voice activity
+                val isLocalUserSpeaking = myId != null && isLocalVoiceActive
+                // Check if remote user is speaking based on activeSpeakerName
+                val isRemoteUserSpeaking = !activeSpeakerName.isNullOrEmpty()
+                // Combined speaking state
+                val isSpeaking = isLocalUserSpeaking || isRemoteUserSpeaking
+                // For display purposes, if local user is speaking, show their info
+                val shouldShowAvatar = if (isLocalUserSpeaking) {
+                    // Try to get local user avatar
+                    val localUser = users.find { it.id == myId }
+                    val localUid = localUser?.uid
+                    if (!localUid.isNullOrEmpty() && avatarCache.getAvatar(localUid) != null) {
+                        avatarCache.getAvatar(localUid)
+                    } else {
+                        activeSpeakerAvatar
+                    }
+                } else {
+                    activeSpeakerAvatar
+                }
                 
                 val borderColor = if (isSpeaking) Color(0xFF2196F3) else Color(0x4DFFFFFF)
                 val borderWidth = if (isSpeaking) 2.dp else 1.dp
@@ -571,9 +587,9 @@ class TsConnectionService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                         // Render Avatar Circle + Mini Speaker Waveform Indicator
                         if (isSpeaking) {
                             // Have speaker: Show user avatar
-                            if (activeSpeakerAvatar != null) {
+                            if (shouldShowAvatar != null) {
                                 androidx.compose.foundation.Image(
-                                    bitmap = activeSpeakerAvatar,
+                                    bitmap = shouldShowAvatar,
                                     contentDescription = "Active Speaker Avatar",
                                     modifier = Modifier.fillMaxSize().clip(CircleShape),
                                     contentScale = ContentScale.Crop,
