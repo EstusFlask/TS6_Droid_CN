@@ -36,6 +36,13 @@
     <string name="voice_activity_threshold">Volume threshold</string>
     <string name="voice_activity_threshold_value">%1$.0f dB</string>
     <string name="voice_activity_threshold_reset">Reset volume threshold</string>
+    <string name="noise_suppression">Noise suppression</string>
+    <string name="noise_suppression_level">Suppression level</string>
+    <string name="noise_suppression_level_low">Low</string>
+    <string name="noise_suppression_level_medium">Medium</string>
+    <string name="noise_suppression_level_high">High</string>
+    <string name="noise_suppression_level_max">Max</string>
+    <string name="noise_suppression_description">Removes background noise from your microphone input.</string>
     <string name="auto_load_images">Auto-load images</string>
     <string name="push_to_talk">Push to talk</string>
     <string name="mute_mic">Mute mic</string>
@@ -82,7 +89,7 @@
     <string name="about_credits_title">Credits &amp; Origins</string>
     <string name="about_credits_desc">This project is based on the excellent open-source project by Grégory D, with deep localization and feature enhancements. Sincere thanks to the original author for his outstanding contributions to the open-source voice community!</string>
     <string name="about_enhancement_title">Localization &amp; Enhancement Statement</string>
-    <string name="about_enhancement_desc">This version features full-text deep localization by yuaxi, along with a comprehensive refactoring of system compatibility code to fix multiple underlying background crash issues. Meanwhile, targeting the scenario of always-on tactical voice comms on mobile, exclusive secondary development added core features such as the [Minimalist Translucent Always-on Floating Console], significantly optimizing the mic/mute interaction experience during esports and gaming.</string>
+    <string name="about_enhancement_desc">This version features full-text deep localization by yuaxi and EstusFlask. EstusFlask contributed fixes for crashes caused by some errors, the duplicate-name prevention feature, the volume threshold feature, and the noise reduction feature. Meanwhile, targeting the scenario of always-on tactical voice comms on mobile, exclusive secondary development added core features such as the [Minimalist Translucent Always-on Floating Console], significantly optimizing the mic/mute interaction experience during esports and gaming.</string>
     <string name="about_license_title">Open Source License (GPLv3)</string>
     <string name="about_license_desc">This project strictly follows the GNU GPLv3 (GNU General Public License v3) open-source license. This means any individual or team modifying or deriving redistributions from this project MUST keep it completely open-source, unconditionally adopt the GPLv3 license, and fully retain the copyright attribution of the original author (Grégory D) and the secondary localization developer (yuaxi). Any form of closed-source packaging, secondary encryption, or secret profiteering is strictly prohibited!</string>
     <string name="about_repo_title">Official Source Repository &amp; Updates</string>

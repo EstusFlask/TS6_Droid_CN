@@ -9,6 +9,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import androidx.core.content.ContextCompat
 import dev.tsdroid.data.SettingsStore
@@ -42,6 +43,10 @@ class AudioBridge(
         private const val FRAME_SIZE_BYTES = FRAME_SIZE_SAMPLES * 2 // 16-bit PCM = 2 bytes/sample
         private const val MAX_QUEUE_FRAMES = 10 // Max buffered frames per user
         private const val LOCAL_VOICE_ACTIVE_THRESHOLD_DB = -46.8f
+        private const val DEFAULT_NOISE_FLOOR_DB = -72.0f
+        private const val VOICE_ACTIVITY_RELEASE_MARGIN_DB = 6.0f
+        private const val VOICE_ACTIVITY_HOLD_FRAMES = 12 // 240 ms at 20 ms/frame
+        private const val VOICE_ACTIVITY_PRE_ROLL_FRAMES = 3 // 60 ms at 20 ms/frame
     }
 
     private val audioConfig = AudioConfig()
@@ -55,9 +60,13 @@ class AudioBridge(
 
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private val noiseSuppressorLock = Any()
 
     private var captureJob: Job? = null
     private var playbackJob: Job? = null
+    private var noiseFloorDb = DEFAULT_NOISE_FLOOR_DB
+    private var speechHoldFrames = 0
 
     // Dedicated single-thread scope for audio playback
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -73,6 +82,28 @@ class AudioBridge(
 
     @Volatile
     var voiceActivityThresholdDb: Float = SettingsStore.DEFAULT_VOICE_ACTIVITY_THRESHOLD_DB
+
+    @Volatile
+    var noiseSuppressionEnabled: Boolean = false
+        set(value) {
+            field = value
+            synchronized(noiseSuppressorLock) {
+                try {
+                    noiseSuppressor?.enabled = value
+                } catch (e: Throwable) {
+                    Log.w(TAG, "Failed to update platform noise suppressor", e)
+                }
+            }
+        }
+
+    @Volatile
+    var noiseSuppressionLevel: Int = SettingsStore.DEFAULT_NOISE_SUPPRESSION_LEVEL
+        set(value) {
+            field = value.coerceIn(
+                SettingsStore.MIN_NOISE_SUPPRESSION_LEVEL,
+                SettingsStore.MAX_NOISE_SUPPRESSION_LEVEL,
+            )
+        }
 
     @Volatile
     private var mutedUserIds: Set<Int> = emptySet()
@@ -137,10 +168,12 @@ class AudioBridge(
             record.release()
             return
         }
+        attachNoiseSuppressor(record)
         try {
             record.startRecording()
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to start microphone capture", e)
+            releaseNoiseSuppressor()
             record.release()
             return
         }
@@ -149,6 +182,9 @@ class AudioBridge(
 
         captureJob = scope.launch(Dispatchers.IO) {
             val buffer = ShortArray(FRAME_SIZE_SAMPLES)
+            val vadPreRollFrames = ArrayDeque<ShortArray>(VOICE_ACTIVITY_PRE_ROLL_FRAMES)
+            var vadGateOpen = false
+            var vadHoldFrames = 0
             val codec = encoder ?: run {
                 Log.e(TAG, "Cannot start capture: Opus encoder is not initialized")
                 _isCapturing.value = false
@@ -167,24 +203,58 @@ class AudioBridge(
                 }
                 if (read == FRAME_SIZE_SAMPLES && !_isMuted.value) {
                     val rmsDb = calculateRmsDb(buffer, read)
+                    if (noiseSuppressionEnabled) {
+                        applyNoiseSuppression(buffer, read)
+                    }
                     val vadEnabled = voiceActivityDetectionEnabled
-                    val isVoiceActive = if (vadEnabled) {
-                        rmsDb >= voiceActivityThresholdDb
+                    if (vadEnabled) {
+                        val wasGateOpen = vadGateOpen
+                        val thresholdDb = voiceActivityThresholdDb
+                        val releaseThresholdDb = thresholdDb - VOICE_ACTIVITY_RELEASE_MARGIN_DB
+
+                        when {
+                            rmsDb >= thresholdDb -> {
+                                vadGateOpen = true
+                                vadHoldFrames = VOICE_ACTIVITY_HOLD_FRAMES
+                            }
+                            vadGateOpen && rmsDb >= releaseThresholdDb -> {
+                                vadHoldFrames = VOICE_ACTIVITY_HOLD_FRAMES
+                            }
+                            vadGateOpen && vadHoldFrames > 0 -> {
+                                vadHoldFrames--
+                            }
+                            else -> {
+                                vadGateOpen = false
+                            }
+                        }
+
+                        _isLocalVoiceActive.value = vadGateOpen
+
+                        if (!vadGateOpen) {
+                            if (vadPreRollFrames.size == VOICE_ACTIVITY_PRE_ROLL_FRAMES) {
+                                vadPreRollFrames.removeFirst()
+                            }
+                            vadPreRollFrames.addLast(buffer.copyOf())
+                            continue
+                        }
+
+                        if (!wasGateOpen) {
+                            while (vadPreRollFrames.isNotEmpty()) {
+                                sendPcmFrame(codec, vadPreRollFrames.removeFirst())
+                            }
+                        }
                     } else {
-                        rmsDb >= LOCAL_VOICE_ACTIVE_THRESHOLD_DB
-                    }
-                    _isLocalVoiceActive.value = isVoiceActive
-
-                    if (vadEnabled && !isVoiceActive) {
-                        continue
+                        vadGateOpen = false
+                        vadHoldFrames = 0
+                        vadPreRollFrames.clear()
+                        _isLocalVoiceActive.value = rmsDb >= LOCAL_VOICE_ACTIVE_THRESHOLD_DB
                     }
 
-                    val pcmBytes = shortsToBytes(buffer)
-                    try {
-                        val encoded = codec.encode(pcmBytes)
-                        tsClient.sendAudio(encoded, CODEC_OPUS_VOICE)
-                    } catch (_: Exception) {}
+                    sendPcmFrame(codec, buffer)
                 } else {
+                    vadGateOpen = false
+                    vadHoldFrames = 0
+                    vadPreRollFrames.clear()
                     _isLocalVoiceActive.value = false
                 }
             }
@@ -192,6 +262,7 @@ class AudioBridge(
             _isLocalVoiceActive.value = false
             val finishedRecord = audioRecord
             audioRecord = null
+            releaseNoiseSuppressor()
             try {
                 finishedRecord?.stop()
             } catch (_: Throwable) {
@@ -207,6 +278,7 @@ class AudioBridge(
         _isCapturing.value = false
         captureJob?.cancel()
         captureJob = null
+        releaseNoiseSuppressor()
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
@@ -369,7 +441,17 @@ class AudioBridge(
         }
     }
 
+    private fun sendPcmFrame(codec: OpusCodec, samples: ShortArray) {
+        val pcmBytes = shortsToBytes(samples)
+        try {
+            val encoded = codec.encode(pcmBytes)
+            tsClient.sendAudio(encoded, CODEC_OPUS_VOICE)
+        } catch (_: Exception) {
+        }
+    }
+
     private fun calculateRmsDb(samples: ShortArray, count: Int): Float {
+        if (count <= 0) return Float.NEGATIVE_INFINITY
         var energy = 0L
         for (i in 0 until count) {
             val sample = samples[i].toLong()
@@ -378,5 +460,85 @@ class AudioBridge(
         val rms = Math.sqrt(energy.toDouble() / count)
         if (rms <= 0.0) return Float.NEGATIVE_INFINITY
         return (20.0 * Math.log10(rms / Short.MAX_VALUE)).toFloat()
+    }
+
+    private fun attachNoiseSuppressor(record: AudioRecord) {
+        releaseNoiseSuppressor()
+        if (!NoiseSuppressor.isAvailable()) return
+
+        try {
+            val suppressor = NoiseSuppressor.create(record.audioSessionId) ?: return
+            suppressor.enabled = noiseSuppressionEnabled
+            synchronized(noiseSuppressorLock) {
+                noiseSuppressor = suppressor
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Platform noise suppressor is unavailable for this capture session", e)
+        }
+    }
+
+    private fun releaseNoiseSuppressor() {
+        val suppressor = synchronized(noiseSuppressorLock) {
+            val current = noiseSuppressor
+            noiseSuppressor = null
+            current
+        }
+        try {
+            suppressor?.enabled = false
+        } catch (_: Throwable) {
+        }
+        try {
+            suppressor?.release()
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun applyNoiseSuppression(samples: ShortArray, count: Int) {
+        val inputRmsDb = calculateRmsDb(samples, count)
+        if (inputRmsDb == Float.NEGATIVE_INFINITY || inputRmsDb.isNaN()) return
+
+        updateNoiseFloor(inputRmsDb)
+
+        val level = noiseSuppressionLevel.coerceIn(
+            SettingsStore.MIN_NOISE_SUPPRESSION_LEVEL,
+            SettingsStore.MAX_NOISE_SUPPRESSION_LEVEL,
+        )
+        val marginDb = 6.0f + level * 3.0f
+        val transitionDb = 5.0f + level
+        val minimumGain = when (level) {
+            0 -> 0.65f
+            1 -> 0.45f
+            2 -> 0.30f
+            else -> 0.18f
+        }
+        val speechThresholdDb = noiseFloorDb + marginDb
+
+        if (inputRmsDb >= speechThresholdDb + transitionDb) {
+            speechHoldFrames = 8
+            return
+        }
+
+        if (speechHoldFrames > 0) {
+            speechHoldFrames--
+            return
+        }
+
+        val openness = ((inputRmsDb - speechThresholdDb) / transitionDb).coerceIn(0.0f, 1.0f)
+        val gain = minimumGain + (1.0f - minimumGain) * openness
+        if (gain >= 0.99f) return
+
+        for (i in 0 until count) {
+            samples[i] = (samples[i] * gain).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                .toShort()
+        }
+    }
+
+    private fun updateNoiseFloor(rmsDb: Float) {
+        noiseFloorDb = when {
+            rmsDb < noiseFloorDb -> noiseFloorDb * 0.90f + rmsDb * 0.10f
+            rmsDb < noiseFloorDb + 12.0f -> noiseFloorDb * 0.995f + rmsDb * 0.005f
+            else -> noiseFloorDb
+        }.coerceIn(-90.0f, -35.0f)
     }
 }

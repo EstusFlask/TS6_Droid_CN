@@ -168,6 +168,16 @@ class ServerViewModel(application: Application) : AndroidViewModel(application) 
             SettingsStore.DEFAULT_VOICE_ACTIVITY_THRESHOLD_DB,
         )
 
+    val noiseSuppressionEnabled: StateFlow<Boolean> = settingsStore.noiseSuppressionEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val noiseSuppressionLevel: StateFlow<Int> = settingsStore.noiseSuppressionLevel
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            SettingsStore.DEFAULT_NOISE_SUPPRESSION_LEVEL,
+        )
+
     // File manager state
     private val _fileManagerOpen = MutableStateFlow(false)
     val fileManagerOpen: StateFlow<Boolean> = _fileManagerOpen.asStateFlow()
@@ -325,6 +335,8 @@ class ServerViewModel(application: Application) : AndroidViewModel(application) 
             service.audioBridge.gainFactor = audioGain.value
             service.audioBridge.voiceActivityDetectionEnabled = voiceActivityDetectionEnabled.value
             service.audioBridge.voiceActivityThresholdDb = voiceActivityThresholdDb.value
+            service.audioBridge.noiseSuppressionEnabled = noiseSuppressionEnabled.value
+            service.audioBridge.noiseSuppressionLevel = noiseSuppressionLevel.value
             viewModelScope.launch {
                 voiceActivityDetectionEnabled.collect {
                     service.audioBridge.voiceActivityDetectionEnabled = it
@@ -333,6 +345,16 @@ class ServerViewModel(application: Application) : AndroidViewModel(application) 
             viewModelScope.launch {
                 voiceActivityThresholdDb.collect {
                     service.audioBridge.voiceActivityThresholdDb = it
+                }
+            }
+            viewModelScope.launch {
+                noiseSuppressionEnabled.collect {
+                    service.audioBridge.noiseSuppressionEnabled = it
+                }
+            }
+            viewModelScope.launch {
+                noiseSuppressionLevel.collect {
+                    service.audioBridge.noiseSuppressionLevel = it
                 }
             }
             // Observe audio state for local talking status
@@ -664,6 +686,20 @@ class ServerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun resetVoiceActivityThresholdDb() {
         setVoiceActivityThresholdDb(SettingsStore.DEFAULT_VOICE_ACTIVITY_THRESHOLD_DB)
+    }
+
+    fun setNoiseSuppressionEnabled(enabled: Boolean) {
+        audioBridge?.noiseSuppressionEnabled = enabled
+        viewModelScope.launch { settingsStore.setNoiseSuppressionEnabled(enabled) }
+    }
+
+    fun setNoiseSuppressionLevel(level: Int) {
+        val value = level.coerceIn(
+            SettingsStore.MIN_NOISE_SUPPRESSION_LEVEL,
+            SettingsStore.MAX_NOISE_SUPPRESSION_LEVEL,
+        )
+        audioBridge?.noiseSuppressionLevel = value
+        viewModelScope.launch { settingsStore.setNoiseSuppressionLevel(value) }
     }
 
     fun toggleVoiceMode() {

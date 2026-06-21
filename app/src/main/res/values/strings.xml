@@ -47,6 +47,13 @@
     <string name="voice_activity_threshold">Seuil d’activité vocale</string>
     <string name="voice_activity_threshold_value">%1$.0f dB</string>
     <string name="voice_activity_threshold_reset">Réinitialiser le seuil d’activité vocale</string>
+    <string name="noise_suppression">Réduction du bruit</string>
+    <string name="noise_suppression_level">Niveau de réduction</string>
+    <string name="noise_suppression_level_low">Faible</string>
+    <string name="noise_suppression_level_medium">Moyen</string>
+    <string name="noise_suppression_level_high">Élevé</string>
+    <string name="noise_suppression_level_max">Max</string>
+    <string name="noise_suppression_description">Supprime le bruit de fond du signal de votre micro.</string>
     <string name="show_link_thumbnails">Miniatures des liens vidéo</string>
     <string name="auto_load_images">Charger les images automatiquement</string>
     <string name="enable_floating_window">Activer la fenêtre flottante</string>

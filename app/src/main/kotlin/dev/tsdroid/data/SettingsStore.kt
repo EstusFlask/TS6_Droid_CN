@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -18,12 +19,17 @@ private val KEY_LANGUAGE = stringPreferencesKey("language")
 private val KEY_ENABLE_FLOATING_WINDOW = booleanPreferencesKey("enable_floating_window")
 private val KEY_VOICE_ACTIVITY_DETECTION_ENABLED = booleanPreferencesKey("voice_activity_detection_enabled")
 private val KEY_VOICE_ACTIVITY_THRESHOLD_DB = floatPreferencesKey("voice_activity_threshold_db")
+private val KEY_NOISE_SUPPRESSION_ENABLED = booleanPreferencesKey("noise_suppression_enabled")
+private val KEY_NOISE_SUPPRESSION_LEVEL = intPreferencesKey("noise_suppression_level")
 
 class SettingsStore(private val context: Context) {
     companion object {
         const val MIN_VOICE_ACTIVITY_THRESHOLD_DB = -80.0f
         const val MAX_VOICE_ACTIVITY_THRESHOLD_DB = 0.0f
         const val DEFAULT_VOICE_ACTIVITY_THRESHOLD_DB = -40.0f
+        const val MIN_NOISE_SUPPRESSION_LEVEL = 0
+        const val MAX_NOISE_SUPPRESSION_LEVEL = 3
+        const val DEFAULT_NOISE_SUPPRESSION_LEVEL = 1
     }
 
     val audioGain: Flow<Float> = context.settingsDataStore.data
@@ -50,6 +56,15 @@ class SettingsStore(private val context: Context) {
                 MIN_VOICE_ACTIVITY_THRESHOLD_DB,
                 MAX_VOICE_ACTIVITY_THRESHOLD_DB,
             ) ?: DEFAULT_VOICE_ACTIVITY_THRESHOLD_DB
+        }
+
+    val noiseSuppressionEnabled: Flow<Boolean> = context.settingsDataStore.data
+        .map { it[KEY_NOISE_SUPPRESSION_ENABLED] ?: false }
+
+    val noiseSuppressionLevel: Flow<Int> = context.settingsDataStore.data
+        .map {
+            (it[KEY_NOISE_SUPPRESSION_LEVEL] ?: DEFAULT_NOISE_SUPPRESSION_LEVEL)
+                .coerceIn(MIN_NOISE_SUPPRESSION_LEVEL, MAX_NOISE_SUPPRESSION_LEVEL)
         }
 
     suspend fun setAudioGain(gain: Float) {
@@ -82,6 +97,17 @@ class SettingsStore(private val context: Context) {
                 MIN_VOICE_ACTIVITY_THRESHOLD_DB,
                 MAX_VOICE_ACTIVITY_THRESHOLD_DB,
             )
+        }
+    }
+
+    suspend fun setNoiseSuppressionEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[KEY_NOISE_SUPPRESSION_ENABLED] = enabled }
+    }
+
+    suspend fun setNoiseSuppressionLevel(level: Int) {
+        context.settingsDataStore.edit {
+            it[KEY_NOISE_SUPPRESSION_LEVEL] = level
+                .coerceIn(MIN_NOISE_SUPPRESSION_LEVEL, MAX_NOISE_SUPPRESSION_LEVEL)
         }
     }
 }

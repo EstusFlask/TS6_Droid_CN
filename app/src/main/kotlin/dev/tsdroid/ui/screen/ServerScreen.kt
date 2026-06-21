@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,6 +77,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -122,6 +124,8 @@ fun ServerScreen(
     val enableFloatingWindow by viewModel.enableFloatingWindow.collectAsState()
     val voiceActivityDetectionEnabled by viewModel.voiceActivityDetectionEnabled.collectAsState()
     val voiceActivityThresholdDb by viewModel.voiceActivityThresholdDb.collectAsState()
+    val noiseSuppressionEnabled by viewModel.noiseSuppressionEnabled.collectAsState()
+    val noiseSuppressionLevel by viewModel.noiseSuppressionLevel.collectAsState()
     val mutedUserIds by viewModel.mutedUserIds.collectAsState()
     val fileManagerOpen by viewModel.fileManagerOpen.collectAsState()
     val fileList by viewModel.fileList.collectAsState()
@@ -204,6 +208,10 @@ fun ServerScreen(
             voiceActivityThresholdDb = voiceActivityThresholdDb,
             onVoiceActivityThresholdDbChange = { viewModel.setVoiceActivityThresholdDb(it) },
             onResetVoiceActivityThresholdDb = { viewModel.resetVoiceActivityThresholdDb() },
+            noiseSuppressionEnabled = noiseSuppressionEnabled,
+            onNoiseSuppressionEnabledChange = { viewModel.setNoiseSuppressionEnabled(it) },
+            noiseSuppressionLevel = noiseSuppressionLevel,
+            onNoiseSuppressionLevelChange = { viewModel.setNoiseSuppressionLevel(it) },
             onDismiss = { showSettings = false },
             onNavigateToAbout = onNavigateToAbout
         )
@@ -732,22 +740,35 @@ private fun SettingsDialog(
     voiceActivityThresholdDb: Float,
     onVoiceActivityThresholdDbChange: (Float) -> Unit,
     onResetVoiceActivityThresholdDb: () -> Unit,
+    noiseSuppressionEnabled: Boolean,
+    onNoiseSuppressionEnabledChange: (Boolean) -> Unit,
+    noiseSuppressionLevel: Int,
+    onNoiseSuppressionLevelChange: (Int) -> Unit,
     onDismiss: () -> Unit,
     onNavigateToAbout: () -> Unit,
 ) {
     var sliderValue by remember(currentGain) { mutableFloatStateOf(currentGain) }
+    var noiseLevelValue by remember(noiseSuppressionLevel) {
+        mutableFloatStateOf(noiseSuppressionLevel.toFloat())
+    }
     var thresholdValue by remember(voiceActivityThresholdDb) {
         mutableFloatStateOf(roundVoiceActivityThreshold(voiceActivityThresholdDb))
     }
     var thresholdText by remember(voiceActivityThresholdDb) {
         mutableStateOf(formatVoiceActivityThreshold(voiceActivityThresholdDb))
     }
+    val settingsScrollState = rememberScrollState()
+    val maxContentHeight = (LocalConfiguration.current.screenHeightDp * 0.65f).dp
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.settings)) },
         text = {
-            Column {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = maxContentHeight)
+                    .verticalScroll(settingsScrollState),
+            ) {
                 Text(
                     text = "${stringResource(R.string.audio_gain)} : ${stringResource(R.string.audio_gain_value, sliderValue)}",
                     style = MaterialTheme.typography.bodyLarge,
@@ -759,6 +780,48 @@ private fun SettingsDialog(
                     onValueChangeFinished = { onGainChange(sliderValue) },
                     valueRange = 1.0f..8.0f,
                     steps = 13, // (8-1)/0.5 - 1 = 13 intermediate steps
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.noise_suppression),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = noiseSuppressionEnabled,
+                        onCheckedChange = onNoiseSuppressionEnabledChange,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "${stringResource(R.string.noise_suppression_level)} : ${
+                        stringResource(noiseSuppressionLevelLabel(noiseLevelValue.roundToInt()))
+                    }",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Spacer(Modifier.height(8.dp))
+                Slider(
+                    value = noiseLevelValue,
+                    onValueChange = {
+                        noiseLevelValue = roundNoiseSuppressionLevel(it).toFloat()
+                    },
+                    onValueChangeFinished = {
+                        onNoiseSuppressionLevelChange(roundNoiseSuppressionLevel(noiseLevelValue))
+                    },
+                    valueRange = SettingsStore.MIN_NOISE_SUPPRESSION_LEVEL.toFloat()..
+                        SettingsStore.MAX_NOISE_SUPPRESSION_LEVEL.toFloat(),
+                    steps = SettingsStore.MAX_NOISE_SUPPRESSION_LEVEL -
+                        SettingsStore.MIN_NOISE_SUPPRESSION_LEVEL - 1,
+                    enabled = noiseSuppressionEnabled,
+                )
+                Text(
+                    text = stringResource(R.string.noise_suppression_description),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(12.dp))
                 Row(
@@ -904,4 +967,23 @@ private fun roundVoiceActivityThreshold(value: Float): Float {
 
 private fun formatVoiceActivityThreshold(value: Float): String {
     return roundVoiceActivityThreshold(value).roundToInt().toString()
+}
+
+private fun roundNoiseSuppressionLevel(value: Float): Int {
+    return value.roundToInt().coerceIn(
+        SettingsStore.MIN_NOISE_SUPPRESSION_LEVEL,
+        SettingsStore.MAX_NOISE_SUPPRESSION_LEVEL,
+    )
+}
+
+private fun noiseSuppressionLevelLabel(level: Int): Int {
+    return when (level.coerceIn(
+        SettingsStore.MIN_NOISE_SUPPRESSION_LEVEL,
+        SettingsStore.MAX_NOISE_SUPPRESSION_LEVEL,
+    )) {
+        0 -> R.string.noise_suppression_level_low
+        1 -> R.string.noise_suppression_level_medium
+        2 -> R.string.noise_suppression_level_high
+        else -> R.string.noise_suppression_level_max
+    }
 }
