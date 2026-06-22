@@ -12,8 +12,8 @@ android {
         applicationId = "com.estusflask.ts6droidpro"
         minSdk = 29
         targetSdk = 35
-        versionCode = 8
-        versionName = "2.1.1-Pro"
+        versionCode = 9
+        versionName = "2.1.2-Pro"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
